@@ -50,7 +50,7 @@ function App() {
   const loadCart = async () => {
   try {
     const response = await fetch(
-      "http://localhost:5000/api/cart"
+      "/api/cart"
     );
 
     const data = await response.json();
@@ -65,7 +65,7 @@ function App() {
   const loadOrders = async () => {
     try {
       const response = await fetch(
-        "http://localhost:5000/api/orders"
+        "/api/orders"
       );
 
       const data = await response.json();
@@ -83,7 +83,7 @@ function App() {
   const addProductToCart = async (product) => {
     try {
       const response = await fetch(
-        "http://localhost:5000/api/cart/add",
+        "/api/cart/add",
         {
           method: "POST",
           headers: {
@@ -108,7 +108,7 @@ function App() {
   const removeProductFromCart = async (productId) => {
     try {
       const response = await fetch(
-        `http://localhost:5000/api/cart/remove/${productId}`,
+        `/api/cart/remove/${productId}`,
         { method: "DELETE" }
       );
 
@@ -128,7 +128,7 @@ function App() {
   const checkout = async () => {
   try {
     const response = await fetch(
-      "http://localhost:5000/api/payment/create-order",
+      "/api/payment/create-order",
       {
         method: "POST",
         headers: {
@@ -155,7 +155,7 @@ function App() {
       handler: async function (paymentResponse) {
   try {
     const verifyResponse = await fetch(
-      "http://localhost:5000/api/payment/verify",
+      "/api/payment/verify",
       {
         method: "POST",
         headers: {
@@ -212,7 +212,7 @@ function App() {
     setAiReply("");
 
     try {
-      const response = await fetch("http://localhost:5000/api/chat", {
+      const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
