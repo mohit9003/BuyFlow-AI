@@ -72,6 +72,27 @@ const products = [
 // SEARCH PRODUCTS
 // ==========================================
 
+function chooseBestProduct(results) {
+  if (!results || results.length === 0) {
+    return null;
+  }
+
+  return [...results].sort((a, b) => {
+    if (b.rating !== a.rating) {
+      return b.rating - a.rating;
+    }
+
+    const aDays = Number.parseInt(a.delivery) || 999;
+    const bDays = Number.parseInt(b.delivery) || 999;
+
+    if (aDays !== bDays) {
+      return aDays - bDays;
+    }
+
+    return a.price - b.price;
+  })[0];
+}
+
 function searchProducts({ category, maxPrice }) {
   let results = [...products];
 
@@ -95,6 +116,9 @@ function searchProducts({ category, maxPrice }) {
 // ==========================================
 
 let cart = [];
+let orders = [];
+let responseHistory = [];
+let conversationHistory = [];
 
 // Add product to cart
 function addToCart(productId) {
@@ -305,14 +329,25 @@ app.post("/api/payment/verify", (req, res) => {
       });
     }
 
+    const currentCart = getCart();
+
+    const order = {
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id,
+      items: [...currentCart.items],
+      total: currentCart.total,
+      status: "PAID",
+      date: new Date().toISOString(),
+    };
+
+    orders.push(order);
+
+    clearCart();
+
     res.json({
       success: true,
       message: "Payment verified successfully",
-      order: {
-        orderId: razorpay_order_id,
-        paymentId: razorpay_payment_id,
-        status: "PAID",
-      },
+      order,
     });
   } catch (error) {
     console.error("Payment verification error:", error);
@@ -324,9 +359,72 @@ app.post("/api/payment/verify", (req, res) => {
   }
 });
 
+app.get("/api/orders", (req, res) => {
+  res.json({
+    success: true,
+    orders,
+  });
+});
+
 // ==========================================
-// AI CHAT
+// AI CHAT + FUNCTION CALLING
 // ==========================================
+
+const searchProductsTool = {
+  name: "search_products",
+  description:
+    "Search available products using category and maximum price.",
+  parameters: {
+    type: "OBJECT",
+    properties: {
+      category: {
+        type: "STRING",
+        description:
+          "Product category such as Running Shoes or Smartphones",
+      },
+      maxPrice: {
+        type: "NUMBER",
+        description: "Maximum budget in INR",
+      },
+    },
+  },
+};
+
+const addToCartTool = {
+  name: "add_to_cart",
+  description:
+    "Add an available product to the shopping cart using its product ID.",
+  parameters: {
+    type: "OBJECT",
+    properties: {
+      productId: {
+        type: "NUMBER",
+        description: "The ID of the product to add",
+      },
+    },
+    required: ["productId"],
+  },
+};
+
+const getCartTool = {
+  name: "get_cart",
+  description:
+    "Get the user's current shopping cart and total amount.",
+  parameters: {
+    type: "OBJECT",
+    properties: {},
+  },
+};
+
+const aiTools = [
+  {
+    functionDeclarations: [
+      searchProductsTool,
+      addToCartTool,
+      getCartTool,
+    ],
+  },
+];
 
 app.post("/api/chat", async (req, res) => {
   try {
@@ -334,48 +432,206 @@ app.post("/api/chat", async (req, res) => {
 
     if (!message || !message.trim()) {
       return res.status(400).json({
+        success: false,
         error: "Message is required",
       });
     }
 
-    const currentCart = getCart();
+    const userMessage = message.trim();
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+    conversationHistory.push({
+      role: "user",
+      parts: [{ text: userMessage }],
+    });
 
-      contents: `
+    if (conversationHistory.length > 12) {
+      conversationHistory = conversationHistory.slice(-12);
+    }
+
+    const previousConversation = conversationHistory
+      .slice(0, -1)
+      .map((turn) => {
+        const textPart = turn.parts?.find((part) => part.text);
+
+        if (!textPart) return "";
+
+        return `${turn.role === "model" ? "BuyFlow AI" : "User"}: ${textPart.text}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    const contents = [
+      {
+        role: "user",
+        parts: [
+          {
+            text: `
 You are BuyFlow AI, an intelligent agentic commerce assistant.
-
-Your job is to help users discover products, compare products,
-understand their requirements and make better purchase decisions.
 
 AVAILABLE PRODUCTS:
 ${JSON.stringify(products, null, 2)}
 
 CURRENT CART:
-${JSON.stringify(currentCart, null, 2)}
+${JSON.stringify(getCart(), null, 2)}
 
-USER REQUEST:
-${message}
+PREVIOUS CONVERSATION:
+${previousConversation || "No previous conversation."}
+
+CURRENT USER REQUEST:
+${userMessage}
 
 RULES:
+1. Understand the current request using the previous conversation.
+2. Use search_products when the user wants to find products.
+3. Respect the user's budget.
+4. Recommend ONLY products available in the catalogue.
+5. Use add_to_cart when the user explicitly asks to add a product.
+6. Use get_cart when the user asks about the cart.
+7. Never invent products, prices, ratings or delivery times.
+8. When the user asks for the BEST product, search first and compare matching products.
+9. Compare rating, price and delivery time.
+10. Choose the best VALUE, not automatically the most expensive product.
+11. If the user says "add the best one", search products first, choose the best matching product, then add it to cart.
+12. If the user says "it", "that one", "the first one", "the cheaper one", or similar, use the previous conversation to understand the reference.
+13. After performing an action, clearly tell the user what happened.
+14. Always provide a final natural-language answer after tool calls.
+15. Keep the final answer concise, friendly and useful.
+16. Use short professional lines instead of one long paragraph.
+17. Do not use Markdown symbols such as **, ## or ###.
+18. For recommendations use:
+Best Choice: Product Name
+Price: ₹...
+Rating: ⭐...
+Delivery: ...
 
-1. Understand the user's shopping intent.
-2. Respect the user's budget.
-3. Recommend ONLY products available in the catalogue.
-4. Never invent products, prices, ratings or delivery times.
-5. Compare products when useful.
-6. Explain briefly why a product is suitable.
-7. If the user asks about the cart, use the current cart information.
-8. Keep responses concise, friendly and useful.
-9. Mention price, rating and delivery when recommending products.
-10. If no product matches the budget, clearly tell the user.
-      `,
+Why: one short sentence.
+
+19. If a product was added, also show:
+Cart Update: Product Name added to your cart.
+Cart Total: ₹...
+
+20. Never claim that a product was added unless the tool result confirms it.
+            `,
+          },
+        ],
+      },
+    ];
+
+    let response = await ai.models.generateContent({
+      model: "gemini-3.6-flash",
+      contents,
+      config: {
+        tools: aiTools,
+      },
     });
+
+    let lastToolUsed = null;
+
+    while (
+      response.functionCalls &&
+      response.functionCalls.length > 0
+    ) {
+      const functionResponses = [];
+
+      contents.push(response.candidates[0].content);
+
+      for (const functionCall of response.functionCalls) {
+        console.log(
+          "AI Tool:",
+          functionCall.name,
+          functionCall.args
+        );
+
+        lastToolUsed = functionCall.name;
+
+        let result;
+
+        if (functionCall.name === "search_products") {
+          result = searchProducts({
+            category: functionCall.args?.category,
+            maxPrice: functionCall.args?.maxPrice,
+          });
+
+          const wantsAdd =
+            /\b(add|cart|buy|purchase)\b/i.test(userMessage);
+
+          const wantsBest =
+            /\b(best|top|recommend)\b/i.test(userMessage);
+
+          if (wantsAdd && wantsBest && result.length > 0) {
+            const bestProduct = chooseBestProduct(result);
+            const addResult = addToCart(bestProduct.id);
+
+            result = {
+              searchResults: result,
+              selectedProduct: bestProduct,
+              addToCart: addResult,
+            };
+
+            lastToolUsed = "add_to_cart";
+          }
+        } else if (functionCall.name === "add_to_cart") {
+          result = addToCart(
+            functionCall.args?.productId
+          );
+        } else if (functionCall.name === "get_cart") {
+          result = getCart();
+        } else {
+          result = {
+            success: false,
+            message: "Unknown tool",
+          };
+        }
+
+        functionResponses.push({
+          role: "user",
+          parts: [
+            {
+              functionResponse: {
+                name: functionCall.name,
+                response: {
+                  result,
+                },
+                id: functionCall.id,
+              },
+            },
+          ],
+        });
+      }
+
+      contents.push(...functionResponses);
+
+      response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents,
+        config: {
+          tools: aiTools,
+        },
+      });
+    }
+
+    const finalReply = (
+      response.text ||
+      "I completed the request successfully."
+    )
+      .replace(/\*\*/g, "")
+      .replace(/^#{1,6}\s*/gm, "")
+      .trim();
+
+    conversationHistory.push({
+      role: "model",
+      parts: [{ text: finalReply }],
+    });
+
+    if (conversationHistory.length > 12) {
+      conversationHistory = conversationHistory.slice(-12);
+    }
 
     res.json({
       success: true,
-      reply: response.text,
+      reply: finalReply,
+      toolUsed: lastToolUsed,
+      cart: getCart(),
     });
   } catch (error) {
     console.error("AI Error:", error);

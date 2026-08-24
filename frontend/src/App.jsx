@@ -40,6 +40,45 @@ function App() {
   const [aiReply, setAiReply] = useState("");
   const [loading, setLoading] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(null);
+  
+  const [orders, setOrders] = useState([]);
+  const [showOrders, setShowOrders] = useState(false);
+  const [showComparison, setShowComparison] = useState(false);
+  const [comparisonProducts, setComparisonProducts] = useState([]);
+
+
+  const loadCart = async () => {
+  try {
+    const response = await fetch(
+      "http://localhost:5000/api/cart"
+    );
+
+    const data = await response.json();
+
+    if (data.success) {
+      setCart(data.cart.items || []);
+    }
+  } catch (error) {
+    console.error("Load cart error:", error);
+  }
+};
+  const loadOrders = async () => {
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/orders"
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        setOrders(data.orders || []);
+        setShowOrders(true);
+      }
+    } catch (error) {
+      console.error("Orders error:", error);
+      alert("Unable to load orders.");
+    }
+  };
 
   const addProductToCart = async (product) => {
     try {
@@ -63,6 +102,26 @@ function App() {
       }
     } catch (error) {
       console.error("Cart error:", error);
+    }
+  };
+
+  const removeProductFromCart = async (productId) => {
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/cart/remove/${productId}`,
+        { method: "DELETE" }
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        setCart(data.cart.items || []);
+      } else {
+        alert(data.message || "Unable to remove product.");
+      }
+    } catch (error) {
+      console.error("Remove cart error:", error);
+      alert("Unable to remove product from cart.");
     }
   };
 
@@ -165,7 +224,26 @@ function App() {
 
       const data = await response.json();
 
-      setAiReply(data.reply);
+setAiReply(data.reply);
+
+const replyText = (data.reply || "").toLowerCase();
+
+const matchedProducts = products.filter((product) => {
+  const productName = product.name.toLowerCase();
+  return replyText.includes(productName);
+});
+
+if (matchedProducts.length > 0) {
+  setComparisonProducts(matchedProducts);
+} else {
+  setComparisonProducts([]);
+}
+
+if (data.cart) {
+  setCart(data.cart.items || []);
+} else if (data.toolUsed === "add_to_cart") {
+  await loadCart();
+}
     } catch (error) {
       setAiReply(
         "I couldn't connect to the BuyFlow AI server. Please make sure the backend is running."
@@ -178,6 +256,34 @@ function App() {
   const handleSuggestion = (text) => {
     setMessage(text);
     setAiReply("");
+    setComparisonProducts([]);
+    setShowComparison(false);
+  };
+
+  const getComparisonProducts = () => {
+    if (comparisonProducts.length > 0) {
+      return comparisonProducts;
+    }
+
+    const query = `${message} ${aiReply}`.toLowerCase();
+
+    const category =
+      query.includes("phone") || query.includes("smartphone")
+        ? "Smartphones"
+        : "Running Shoes";
+
+    const budgetMatch = query.match(
+      /(?:under|below|within|budget(?:\s+of)?)\s*₹?\s*([\d,]+)/i
+    );
+
+    const maxPrice = budgetMatch
+      ? Number(budgetMatch[1].replace(/,/g, ""))
+      : null;
+
+    return products
+      .filter((product) => product.category === category)
+      .filter((product) => !maxPrice || product.price <= maxPrice)
+      .sort((a, b) => b.rating - a.rating || a.price - b.price);
   };
 
   return (
@@ -197,15 +303,37 @@ function App() {
               </p>
             </div>
           </div>
-
-          <button className="relative rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm transition hover:bg-white/10">
-            🛒 Cart
-            {cart.length > 0 && (
-              <span className="ml-2 rounded-full bg-violet-500 px-2 py-0.5 text-xs">
-                {cart.length}
-              </span>
-            )}
+         <div className="flex items-center gap-3">
+<button
+            type="button"
+            onClick={loadOrders}
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm transition hover:bg-white/10"
+          >
+            📦 Orders
           </button>
+          <button
+  onClick={() => {
+    document
+      .getElementById("cart-section")
+      ?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      
+  }}
+  
+  className="relative rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm transition hover:bg-white/10"
+  
+>
+  🛒 Cart
+
+  {cart.length > 0 && (
+    <span className="ml-2 rounded-full bg-violet-500 px-2 py-0.5 text-xs">
+      {cart.length}
+    </span>
+  )}
+</button>
+          </div>
         </div>
       </nav>
 
@@ -263,6 +391,107 @@ function App() {
       >
         Continue Shopping
       </button>
+    </div>
+  </div>
+)}
+{showOrders && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6">
+    <div className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-white/10 bg-slate-950 p-8 shadow-2xl">
+
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-violet-400">
+            BUYFLOW AI
+          </p>
+
+          <h2 className="mt-1 text-3xl font-bold">
+            Order History 📦
+          </h2>
+        </div>
+
+        <button
+          onClick={() => setShowOrders(false)}
+          className="rounded-xl border border-white/10 px-4 py-2 text-slate-400 hover:bg-white/5 hover:text-white"
+        >
+          ✕
+        </button>
+      </div>
+
+      {orders.length === 0 ? (
+        <div className="mt-10 rounded-2xl border border-white/10 bg-white/5 p-8 text-center">
+          <div className="text-5xl">🛍️</div>
+
+          <h3 className="mt-4 text-xl font-semibold">
+            No orders yet
+          </h3>
+
+          <p className="mt-2 text-sm text-slate-500">
+            Your completed orders will appear here.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-6 space-y-4">
+          {orders
+            .slice()
+            .reverse()
+            .map((order) => (
+              <div
+                key={order.orderId}
+                className="rounded-2xl border border-white/10 bg-white/5 p-5"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs text-slate-500">
+                      ORDER ID
+                    </p>
+
+                    <p className="mt-1 max-w-[300px] truncate text-sm font-medium">
+                      {order.orderId}
+                    </p>
+                  </div>
+
+                  <span className="rounded-full bg-green-500/10 px-3 py-1 text-xs font-semibold text-green-400">
+                    {order.status}
+                  </span>
+                </div>
+
+                <div className="mt-5 space-y-2">
+                  {order.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex justify-between text-sm"
+                    >
+                      <span className="text-slate-400">
+                        {item.name} × {item.quantity}
+                      </span>
+
+                      <span>
+                        ₹
+                        {(
+                          item.price * item.quantity
+                        ).toLocaleString("en-IN")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 flex justify-between border-t border-white/10 pt-4">
+                  <span className="text-slate-500">
+                    Total
+                  </span>
+
+                  <span className="text-lg font-bold">
+                    ₹{order.total.toLocaleString("en-IN")}
+                  </span>
+                </div>
+
+                <p className="mt-3 text-xs text-slate-600">
+                  Payment ID: {order.paymentId}
+                </p>
+              </div>
+            ))}
+        </div>
+      )}
     </div>
   </div>
 )}
@@ -372,9 +601,9 @@ function App() {
                 </div>
 
                 <div className="mt-4 rounded-xl border border-white/5 bg-black/20 p-4">
-                  <p className="text-sm leading-7 text-slate-300">
-                    {aiReply}
-                  </p>
+                 <p className="whitespace-pre-line text-sm leading-7 text-slate-300">
+  {aiReply}
+</p>
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -386,7 +615,7 @@ function App() {
                   </button>
 
                   <button
-                    onClick={() => setMessage("Compare these products")}
+                    onClick={() => setShowComparison(true)}
                     className="rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-400 transition hover:bg-white/5 hover:text-white"
                   >
                     ⚖️ Compare
@@ -403,6 +632,94 @@ function App() {
             )}
           </div>
         </section>
+
+        {showComparison && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6">
+            <div className="max-h-[85vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-white/10 bg-slate-950 p-8 shadow-2xl">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-sm font-medium text-violet-400">BUYFLOW AI</p>
+                  <h2 className="mt-1 text-3xl font-bold">Product Comparison ⚖️</h2>
+                  <p className="mt-2 text-sm text-slate-500">
+                    Compare available options before making your decision.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowComparison(false)}
+                  className="rounded-xl border border-white/10 px-4 py-2 text-slate-400 hover:bg-white/5 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="mt-8 grid gap-4 md:grid-cols-3">
+                {getComparisonProducts().map((product, index) => (
+                  <div
+                    key={product.id}
+                    className={`rounded-2xl border p-5 ${
+                      index === 0
+                        ? "border-violet-400/30 bg-violet-500/10"
+                        : "border-white/10 bg-white/5"
+                    }`}
+                  >
+                    {index === 0 && (
+                      <span className="rounded-full bg-violet-500/20 px-3 py-1 text-xs font-semibold text-violet-300">
+                        BEST VALUE
+                      </span>
+                    )}
+
+                    <img
+                      src={product.image}
+                      alt={product.name}
+                      className="mt-4 h-40 w-full rounded-xl object-cover"
+                    />
+
+                    <p className="mt-4 text-xs text-violet-400">{product.category}</p>
+                    <h3 className="mt-1 text-lg font-semibold">{product.name}</h3>
+
+                    <div className="mt-4 space-y-3 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Price</span>
+                        <span className="font-semibold">
+                          ₹{product.price.toLocaleString("en-IN")}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Rating</span>
+                        <span className="text-yellow-400">⭐ {product.rating}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Delivery</span>
+                        <span>{product.delivery}</span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => addProductToCart(product)}
+                      className="mt-5 w-full rounded-xl bg-white py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-violet-200"
+                    >
+                      Add to Cart
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-cyan-400/10 bg-cyan-500/5 p-5">
+                <p className="text-sm font-semibold text-cyan-300">
+                  BuyFlow AI Recommendation
+                </p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  The highlighted option has the highest rating among the
+                  available products. Consider price and delivery time based
+                  on your priorities.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Recommendations */}
         <section className="mt-16">
@@ -474,7 +791,10 @@ function App() {
 
         {/* Cart */}
 {cart.length > 0 && (
-  <section className="mt-16 rounded-3xl border border-white/10 bg-white/5 p-8">
+  <section
+  id="cart-section"
+  className="mt-16 rounded-3xl border border-white/10 bg-white/5 p-8"
+>
     <div className="flex items-center justify-between">
       <div>
         <p className="text-sm font-medium text-violet-400">
@@ -495,19 +815,35 @@ function App() {
       {cart.map((item) => (
         <div
           key={item.id}
-          className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-950/60 p-4"
+          className="flex items-center justify-between gap-4 rounded-xl border border-white/10 bg-slate-950/60 p-4"
         >
-          <div>
+          <div className="min-w-0">
             <h4 className="font-semibold">{item.name}</h4>
 
             <p className="mt-1 text-sm text-slate-500">
               {item.category}
             </p>
+
+            <p className="mt-1 text-xs text-slate-500">
+              Quantity: {item.quantity || 1}
+            </p>
           </div>
 
-          <span className="font-bold">
-            ₹{item.price.toLocaleString("en-IN")}
-          </span>
+          <div className="flex items-center gap-4">
+            <span className="font-bold">
+              ₹{(
+                item.price * (item.quantity || 1)
+              ).toLocaleString("en-IN")}
+            </span>
+
+            <button
+              type="button"
+              onClick={() => removeProductFromCart(item.id)}
+              className="rounded-lg border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-400 transition hover:bg-red-500/20"
+            >
+              🗑️ Remove
+            </button>
+          </div>
         </div>
       ))}
     </div>
@@ -518,7 +854,11 @@ function App() {
       <span className="text-2xl font-bold">
         ₹
         {cart
-          .reduce((total, item) => total + item.price, 0)
+          .reduce(
+            (total, item) =>
+              total + item.price * (item.quantity || 1),
+            0
+          )
           .toLocaleString("en-IN")}
       </span>
     </div>
